@@ -662,12 +662,14 @@ interface IUniswapV2Router02 is IUniswapV2Router01 {
         address to,
         uint deadline
     ) external;
+
     function swapExactETHForTokensSupportingFeeOnTransferTokens(
         uint amountOutMin,
         address[] calldata path,
         address to,
         uint deadline
     ) external payable;
+
     function swapExactTokensForETHSupportingFeeOnTransferTokens(
         uint amountIn,
         uint amountOutMin,
@@ -717,7 +719,7 @@ contract MISAD is Context, IERC20, Ownable {
     bool public swapAndLiquifyEnabled = true;
     
     uint256 public _maxTxAmount = 350000000 * 10**6 * 10**9; //1%
-    uint256 constant numTokensSellToAddToLiquidity = 17500000 * 10**6 * 10**9; //0.05%
+    uint256 public numTokensSellToAddToLiquidity = 17500000 * 10**6 * 10**9; //0.05%
         
     event MinTokensBeforeSwapUpdated(uint256 minTokensBeforeSwap);
     event SwapAndLiquifyEnabledUpdated(bool enabled);
@@ -791,7 +793,7 @@ contract MISAD is Context, IERC20, Ownable {
     }
 
     function increaseAllowance(address spender, uint256 addedValue) public virtual returns (bool) {
-        _approve(_msgSender(), spender, _allowances[_msgSender()][spender].add(addedValue));
+        _approve(_msgSender(), spender, _allowances[_msgSender()][spender] + addedValue);
         return true;
     }
 
@@ -817,9 +819,9 @@ contract MISAD is Context, IERC20, Ownable {
         address sender = _msgSender();
         require(!_isExcluded[sender], "Excluded addresses cannot call this function");
         (uint256 rAmount,,,,,,) = _getValues(tAmount);
-        _rOwned[sender] = _rOwned[sender].sub(rAmount);
-        _rTotal = _rTotal.sub(rAmount);
-        _tFeeTotal = _tFeeTotal.add(tAmount);
+        _rOwned[sender] = _rOwned[sender] - rAmount;
+        _rTotal = _rTotal - rAmount;
+        _tFeeTotal = _tFeeTotal + tAmount;
     }
 
     function reflectionFromToken(uint256 tAmount, bool deductTransferFee) public view returns(uint256) {
@@ -836,7 +838,7 @@ contract MISAD is Context, IERC20, Ownable {
     function tokenFromReflection(uint256 rAmount) public view returns(uint256) {
         require(rAmount <= _rTotal, "Amount must be less than total reflections");
         uint256 currentRate =  _getRate();
-        return rAmount.div(currentRate);
+        return rAmount / currentRate;
     }
 
     function excludeFromReward(address account) public onlyOwner() {
@@ -854,11 +856,11 @@ contract MISAD is Context, IERC20, Ownable {
             if (_excluded[i] == account) {
                 if (_tOwned[account] > 0)
                 {
-                    uint256 newrOwned = _tOwned[account].mul(_getRate());
+                    uint256 newrOwned = _tOwned[account] * _getRate();
                     if (_rOwned[account]>newrOwned)
                     {
-                        _rTotal = _rTotal.sub(_rOwned[account]-newrOwned);
-                        _tFeeTotal = _tFeeTotal.add(tokenFromReflection(_rOwned[account]-newrOwned));
+                        _rTotal = _rTotal-(_rOwned[account]-newrOwned);
+                        _tFeeTotal = _tFeeTotal + tokenFromReflection(_rOwned[account]-newrOwned);
                     }
                     _rOwned[account] = newrOwned;
                 }
@@ -905,42 +907,37 @@ contract MISAD is Context, IERC20, Ownable {
 
     function setMaxTxPercent(uint256 maxTxPercent) external onlyOwner() {
         require(maxTxPercent >= 0 && maxTxPercent <= 10**4, "Invalid fee");
-        _maxTxAmount = _tTotal.mul(maxTxPercent).div(10**4);
+        _maxTxAmount = _tTotal * maxTxPercent / 10**4;
     }
 
     function setSwapAndLiquifyEnabled(bool _enabled) public onlyOwner {
         swapAndLiquifyEnabled = _enabled;
         emit SwapAndLiquifyEnabledUpdated(_enabled);
     }
+
+    function setNumTokensSellToAddToLiquidity(uint256 _numTokens) external onlyOwner() {
+        require(_numTokens >= 0 && _numTokens <= totalSupply(), "Negative token value or exceeds total supply");
+        numTokensSellToAddToLiquidity = _numTokens;
+    }
+
     //to recieve ETH from uniswapV2Router when swaping
     receive() external payable {}
 
     function _getValues(uint256 tAmount) private view returns (uint256, uint256, uint256, uint256, uint256, uint256, uint256) {
-        (uint256 tTransferAmount, uint256 tFee, uint256 tLiquidity, uint256 tTreasure) = _getTValues(tAmount);
-        (uint256 rAmount, uint256 rTransferAmount, uint256 rFee) = _getRValues(tAmount, tFee, tLiquidity, tTreasure, _getRate());
+        (uint256 tFee, uint256 tLiquidity, uint256 tTreasure) = calculateFees(tAmount);
+
+        uint256 tTransferAmount = tAmount - tFee - tLiquidity - tTreasure;
+        uint256 currentRate = _getRate();
+        uint256 rAmount = tAmount * currentRate;
+        uint256 rFee = tFee * currentRate;
+        uint256 rTransferAmount = rAmount - rFee - (tLiquidity * currentRate) - (tTreasure * currentRate);
+
         return (rAmount, rTransferAmount, rFee, tTransferAmount, tFee, tLiquidity, tTreasure);
-    }
-
-    function _getTValues(uint256 tAmount) private view returns (uint256, uint256, uint256, uint256) {
-        uint256 tFee = calculateReflectFee(tAmount);
-        uint256 tLiquidity = calculateLiquidityFee(tAmount);
-        uint256 tTreasure = calculateTreasureFee(tAmount);
-        uint256 tTransferAmount = tAmount.sub(tFee).sub(tLiquidity).sub(tTreasure);
-        return (tTransferAmount, tFee, tLiquidity, tTreasure);
-    }
-
-    function _getRValues(uint256 tAmount, uint256 tFee, uint256 tLiquidity, uint256 tTreasure, uint256 currentRate) private pure returns (uint256, uint256, uint256) {
-        uint256 rAmount = tAmount.mul(currentRate);
-        uint256 rFee = tFee.mul(currentRate);
-        uint256 rLiquidity = tLiquidity.mul(currentRate);
-        uint256 rTreasure = tTreasure.mul(currentRate);
-        uint256 rTransferAmount = rAmount.sub(rFee).sub(rLiquidity).sub(rTreasure);
-        return (rAmount, rTransferAmount, rFee);
     }
 
     function _getRate() private view returns(uint256) {
         (uint256 rSupply, uint256 tSupply) = _getCurrentSupply();
-        return rSupply.div(tSupply);
+        return rSupply / tSupply;
     }
 
     function _getCurrentSupply() private view returns(uint256, uint256) {
@@ -948,44 +945,35 @@ contract MISAD is Context, IERC20, Ownable {
         uint256 tSupply = _tTotal;      
         for (uint256 i = 0; i < _excluded.length; i++) {
             if (_rOwned[_excluded[i]] > rSupply || _tOwned[_excluded[i]] > tSupply) return (_rTotal, _tTotal);
-            rSupply = rSupply.sub(_rOwned[_excluded[i]]);
-            tSupply = tSupply.sub(_tOwned[_excluded[i]]);
+            rSupply = rSupply - _rOwned[_excluded[i]];
+            tSupply = tSupply - _tOwned[_excluded[i]];
         }
-        if (rSupply < _rTotal.div(_tTotal)) return (_rTotal, _tTotal);
+        if (rSupply < _rTotal / _tTotal) return (_rTotal, _tTotal);
         return (rSupply, tSupply);
     }
 
     function _takeTaxes(uint256 tLiquidity, uint256 tTreasure, uint256 rFee, uint256 tFee) private {
         uint256 currentRate = _getRate();
 
-        uint256 rLiquidity = tLiquidity.mul(currentRate);
-        _rOwned[address(this)] = _rOwned[address(this)].add(rLiquidity);
+        uint256 rLiquidity = tLiquidity * currentRate;
+        _rOwned[address(this)] = _rOwned[address(this)] + rLiquidity;
         if(_isExcluded[address(this)])
-            _tOwned[address(this)] = _tOwned[address(this)].add(tLiquidity);
+            _tOwned[address(this)] = _tOwned[address(this)] + tLiquidity;
 
         if (tTreasure > 0) {
-            uint256 rTreasure = tTreasure.mul(currentRate);
-            _rOwned[_treasureAddress] = _rOwned[_treasureAddress].add(rTreasure);
+            uint256 rTreasure = tTreasure * currentRate;
+            _rOwned[_treasureAddress] = _rOwned[_treasureAddress] + rTreasure;
             if (_isExcluded[_treasureAddress])
-                _tOwned[_treasureAddress] = _tOwned[_treasureAddress].add(tTreasure);
+                _tOwned[_treasureAddress] = _tOwned[_treasureAddress] + tTreasure;
             emit Transfer(_msgSender(), _treasureAddress, tTreasure);
         }
 
-        _rTotal = _rTotal.sub(rFee);
-        _tFeeTotal = _tFeeTotal.add(tFee);
+        _rTotal = _rTotal - rFee;
+        _tFeeTotal = _tFeeTotal + tFee;
     }
-    
-    function calculateReflectFee(uint256 _amount) private view returns (uint256) {
-        return _amount.mul(_reflectFee).div(10**4);
-    }
-
-    function calculateLiquidityFee(uint256 _amount) private view returns (uint256) {
-        return _amount.mul(_liquidityFee).div(10**4);
-    }
-
-    function calculateTreasureFee(uint256 _amount) private view returns (uint256)
-    {
-        return _amount.mul(_treasureFee).div(10**4);
+        
+    function calculateFees(uint256 _amount) private view returns (uint256, uint256, uint256) {
+        return (_amount * _reflectFee / 10**4, _amount * _liquidityFee / 10**4, _amount * _treasureFee / 10**4);
     }
     
     function removeAllFee() private {
@@ -1018,14 +1006,11 @@ contract MISAD is Context, IERC20, Ownable {
         emit Approval(owner, spender, amount);
     }
 
-    function _transfer(
-        address from,
-        address to,
-        uint256 amount
-    ) private {
+    function _transfer(address from, address to, uint256 amount) private {
         require(from != address(0), "ERC20: transfer from the zero address");
         require(to != address(0), "ERC20: transfer to the zero address");
         require(amount > 0, "Transfer amount must be greater than zero");
+
         if(from != owner() && to != owner())
             require(amount <= _maxTxAmount, "Transfer amount exceeds the maxTxAmount.");
 
@@ -1063,13 +1048,13 @@ contract MISAD is Context, IERC20, Ownable {
         }
         
         //transfer amount, it will take tax, burn, liquidity fee
-        _tokenTransfer(from,to,amount,takeFee);
+        _tokenTransfer(from, to, amount, takeFee);
     }
 
     function swapAndLiquify(uint256 contractTokenBalance) private lockTheSwap {
         // split the contract balance into halves
-        uint256 half = contractTokenBalance.div(2);
-        uint256 otherHalf = contractTokenBalance.sub(half);
+        uint256 half = contractTokenBalance / 2;
+        uint256 otherHalf = contractTokenBalance - half;
 
         // capture the contract's current ETH balance.
         // this is so that we can capture exactly the amount of ETH that the
@@ -1081,7 +1066,7 @@ contract MISAD is Context, IERC20, Ownable {
         swapTokensForEth(half); // <- this breaks the ETH -> HATE swap when swap+liquify is triggered
 
         // how much ETH did we just swap into?
-        uint256 newBalance = address(this).balance.sub(initialBalance);
+        uint256 newBalance = address(this).balance - initialBalance;
 
         // add liquidity to uniswap
         addLiquidity(otherHalf, newBalance);
@@ -1130,24 +1115,24 @@ contract MISAD is Context, IERC20, Ownable {
         (uint256 rAmount, uint256 rTransferAmount, uint256 rFee, uint256 tTransferAmount, uint256 tFee, uint256 tLiquidity, uint256 tTreasure) = _getValues(tAmount);
         
         if (_isExcluded[sender] && !_isExcluded[recipient]) {
-            _tOwned[sender] = _tOwned[sender].sub(tAmount);
-            _rOwned[sender] = _rOwned[sender].sub(rAmount);
-            _rOwned[recipient] = _rOwned[recipient].add(rTransferAmount);   
+            _tOwned[sender] = _tOwned[sender] - tAmount;
+            _rOwned[sender] = _rOwned[sender] - rAmount;
+            _rOwned[recipient] = _rOwned[recipient] + rTransferAmount;   
         } else if (!_isExcluded[sender] && _isExcluded[recipient]) {
-            _rOwned[sender] = _rOwned[sender].sub(rAmount);
-            _tOwned[recipient] = _tOwned[recipient].add(tTransferAmount);
-            _rOwned[recipient] = _rOwned[recipient].add(rTransferAmount);           
+            _rOwned[sender] = _rOwned[sender] - rAmount;
+            _tOwned[recipient] = _tOwned[recipient] + tTransferAmount;
+            _rOwned[recipient] = _rOwned[recipient] + rTransferAmount;           
         } else if (!_isExcluded[sender] && !_isExcluded[recipient]) {    
-            _rOwned[sender] = _rOwned[sender].sub(rAmount);
-            _rOwned[recipient] = _rOwned[recipient].add(rTransferAmount);
+            _rOwned[sender] = _rOwned[sender] - rAmount;
+            _rOwned[recipient] = _rOwned[recipient] + rTransferAmount;
         } else if (_isExcluded[sender] && _isExcluded[recipient]) {
-            _tOwned[sender] = _tOwned[sender].sub(tAmount);
-            _rOwned[sender] = _rOwned[sender].sub(rAmount);
-            _tOwned[recipient] = _tOwned[recipient].add(tTransferAmount);
-            _rOwned[recipient] = _rOwned[recipient].add(rTransferAmount);       
+            _tOwned[sender] = _tOwned[sender] - tAmount;
+            _rOwned[sender] = _rOwned[sender] - rAmount;
+            _tOwned[recipient] = _tOwned[recipient] + tTransferAmount;
+            _rOwned[recipient] = _rOwned[recipient] + rTransferAmount;       
         } else {
-            _rOwned[sender] = _rOwned[sender].sub(rAmount);
-            _rOwned[recipient] = _rOwned[recipient].add(rTransferAmount);
+            _rOwned[sender] = _rOwned[sender] - rAmount;
+            _rOwned[recipient] = _rOwned[recipient] + rTransferAmount;
         }
 
         _takeTaxes(tLiquidity, tTreasure, rFee, tFee); 
