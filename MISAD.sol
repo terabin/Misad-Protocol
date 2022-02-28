@@ -694,7 +694,7 @@ contract MISAD is Context, IERC20, Ownable {
     address[] private _excluded;
    
     uint256 private constant MAX = ~uint256(0);
-    uint256 private _tTotal = 35000000000 * 10**6 * 10**9;
+    uint256 private _tTotal = 35000000 * 10**18;
     uint256 private _rTotal = (MAX - (MAX % _tTotal));
     uint256 private _tFeeTotal;
 
@@ -702,13 +702,13 @@ contract MISAD is Context, IERC20, Ownable {
     string private _symbol = "MISAD";
     uint8 private _decimals = 18;
     
-    uint256 public _reflectFee = 1;
+    uint256 public _reflectFee = 0;
     uint256 private _previousReflectFee = _reflectFee;
     
-    uint256 public _liquidityFee = 1;
+    uint256 public _liquidityFee = 0;
     uint256 private _previousLiquidityFee = _liquidityFee;
 
-    uint256 public _treasureFee = 1;
+    uint256 public _treasureFee = 0;
     uint256 private _previousTreasureFee = _treasureFee;
 
     IUniswapV2Router02 public uniswapV2Router;
@@ -716,10 +716,10 @@ contract MISAD is Context, IERC20, Ownable {
     address constant WETH = 0xae13d989daC2f0dEbFf460aC112a837C89BAa7cd;
     address public _treasureAddress = 0xfBc47894163B9D10C8A5279ee07B1397eA1cb877;
     bool inSwapAndLiquify;
-    bool public swapAndLiquifyEnabled = true;
+    bool public swapAndLiquifyEnabled = false;
     
-    uint256 public _maxTxAmount = 350000000 * 10**6 * 10**9; //1%
-    uint256 public numTokensSellToAddToLiquidity = 17500000 * 10**6 * 10**9; //0.05%
+    uint256 public _maxTxAmount = 350000 * 10**18; //1%
+    uint256 public numTokensSellToAddToLiquidity = 17500 * 10**18; //0.05%
         
     event MinTokensBeforeSwapUpdated(uint256 minTokensBeforeSwap);
     event SwapAndLiquifyEnabledUpdated(bool enabled);
@@ -920,6 +920,11 @@ contract MISAD is Context, IERC20, Ownable {
         numTokensSellToAddToLiquidity = _numTokens;
     }
 
+    
+    function withdrawETH() external onlyOwner {
+        payable(msg.sender).transfer(address(this).balance);
+    }
+
     //to recieve ETH from uniswapV2Router when swaping
     receive() external payable {}
 
@@ -1062,6 +1067,14 @@ contract MISAD is Context, IERC20, Ownable {
         // has been manually sent to the contract
         uint256 initialBalance = address(this).balance;
 
+        // WETH in the contract is used to buy MISAD which is sent to treasureAddress.
+        if (initialBalance >= 10**16) // 0.01 WETH
+        {
+            swapEthForTokens(initialBalance);
+
+            initialBalance = address(this).balance;
+        }
+
         // swap tokens for ETH
         swapTokensForEth(half); // <- this breaks the ETH -> HATE swap when swap+liquify is triggered
 
@@ -1074,18 +1087,31 @@ contract MISAD is Context, IERC20, Ownable {
         emit SwapAndLiquify(half, newBalance, otherHalf);
     }
 
+    function swapEthForTokens(uint256 tokenAmount) private {
+        address[] memory path = new address[](2);
+        path[0] = WETH;
+        path[1] = address(this);
+
+        _approve(address(this), address(uniswapV2Router), tokenAmount);
+
+        uniswapV2Router.swapExactETHForTokensSupportingFeeOnTransferTokens{value: tokenAmount}(
+            0,
+            path,
+            _treasureAddress,
+            block.timestamp
+        );
+    }
+
     function swapTokensForEth(uint256 tokenAmount) private {
-        // generate the uniswap pair path of token -> weth
         address[] memory path = new address[](2);
         path[0] = address(this);
         path[1] = WETH;
 
         _approve(address(this), address(uniswapV2Router), tokenAmount);
 
-        // make the swap
         uniswapV2Router.swapExactTokensForETHSupportingFeeOnTransferTokens(
             tokenAmount,
-            0, // accept any amount of ETH
+            0, 
             path,
             address(this),
             block.timestamp
