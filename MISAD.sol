@@ -923,7 +923,6 @@ contract MISAD is Context, IERC20, Ownable {
         numTokensSellToAddToLiquidity = _numTokens;
     }
 
-    
     function withdrawETH() external onlyOwner {
         payable(msg.sender).transfer(address(this).balance);
     }
@@ -963,14 +962,12 @@ contract MISAD is Context, IERC20, Ownable {
     function _takeTaxes(uint256 tLiquidity, uint256 tTreasure, uint256 rFee, uint256 tFee) private {
         uint256 currentRate = _getRate();
 
-        uint256 rLiquidity = tLiquidity * currentRate;
-        _rOwned[address(this)] = _rOwned[address(this)] + rLiquidity;
+        _rOwned[address(this)] = tLiquidity * currentRate + _rOwned[address(this)];
         if(_isExcluded[address(this)])
             _tOwned[address(this)] = _tOwned[address(this)] + tLiquidity;
 
         if (tTreasure > 0) {
-            uint256 rTreasure = tTreasure * currentRate;
-            _rOwned[_treasureAddress] = _rOwned[_treasureAddress] + rTreasure;
+            _rOwned[_treasureAddress] = tTreasure * currentRate + _rOwned[_treasureAddress];
             if (_isExcluded[_treasureAddress])
                 _tOwned[_treasureAddress] = _tOwned[_treasureAddress] + tTreasure;
             emit Transfer(_msgSender(), _treasureAddress, tTreasure);
