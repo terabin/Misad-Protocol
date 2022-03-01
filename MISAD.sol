@@ -693,14 +693,15 @@ contract MISAD is Context, IERC20, Ownable {
     mapping (address => bool) private _isExcluded;
     address[] private _excluded;
    
+    string private _name = "Misadventure Coin";
+    string private _symbol = "MISAD";
+
+    uint8 private _decimals = 18;
+
     uint256 private constant MAX = ~uint256(0);
     uint256 private _tTotal = 35000000 * 10**18;
     uint256 private _rTotal = (MAX - (MAX % _tTotal));
     uint256 private _tFeeTotal;
-
-    string private _name = "Misadventure Coin";
-    string private _symbol = "MISAD";
-    uint8 private _decimals = 18;
     
     uint256 public _reflectFee = 0;
     uint256 private _previousReflectFee = _reflectFee;
@@ -711,15 +712,17 @@ contract MISAD is Context, IERC20, Ownable {
     uint256 public _treasureFee = 0;
     uint256 private _previousTreasureFee = _treasureFee;
 
+    uint256 public _maxTxAmount = 350000 * 10**18; //1%
+    uint256 public numTokensSellToAddToLiquidity = 17500 * 10**18; //0.05%
+
     IUniswapV2Router02 public uniswapV2Router;
+
     address public uniswapV2Pair;
     address constant WETH = 0xae13d989daC2f0dEbFf460aC112a837C89BAa7cd;
     address public _treasureAddress = 0xfBc47894163B9D10C8A5279ee07B1397eA1cb877;
+
     bool inSwapAndLiquify;
     bool public swapAndLiquifyEnabled = false;
-    
-    uint256 public _maxTxAmount = 350000 * 10**18; //1%
-    uint256 public numTokensSellToAddToLiquidity = 17500 * 10**18; //0.05%
         
     event MinTokensBeforeSwapUpdated(uint256 minTokensBeforeSwap);
     event SwapAndLiquifyEnabledUpdated(bool enabled);
@@ -925,7 +928,7 @@ contract MISAD is Context, IERC20, Ownable {
         payable(msg.sender).transfer(address(this).balance);
     }
 
-    //to recieve ETH from uniswapV2Router when swaping
+    //to receive ETH from uniswapV2Router when swaping
     receive() external payable {}
 
     function _getValues(uint256 tAmount) private view returns (uint256, uint256, uint256, uint256, uint256, uint256, uint256) {
@@ -1016,6 +1019,7 @@ contract MISAD is Context, IERC20, Ownable {
         require(to != address(0), "ERC20: transfer to the zero address");
         require(amount > 0, "Transfer amount must be greater than zero");
 
+        // no tx amount for the owner
         if(from != owner() && to != owner())
             require(amount <= _maxTxAmount, "Transfer amount exceeds the maxTxAmount.");
 
@@ -1067,13 +1071,17 @@ contract MISAD is Context, IERC20, Ownable {
         // has been manually sent to the contract
         uint256 initialBalance = address(this).balance;
 
-        // WETH in the contract is used to buy MISAD which is sent to treasureAddress.
-        if (initialBalance >= 10**16) // 0.01 WETH
+        // ETH in the contract is used to buy MISAD which is sent to treasureAddress.
+        if (initialBalance >= 10**16) // 0.01 ETH
         {
             swapEthForTokens(initialBalance);
 
             initialBalance = address(this).balance;
         }
+
+        // there is no problem for the liquidity provider to spend the tokens,
+        // doing this just once here will save some gas.
+        _approve(address(this), address(uniswapV2Router), contractTokenBalance);
 
         // swap tokens for ETH
         swapTokensForEth(half); // <- this breaks the ETH -> HATE swap when swap+liquify is triggered
@@ -1092,8 +1100,7 @@ contract MISAD is Context, IERC20, Ownable {
         path[0] = WETH;
         path[1] = address(this);
 
-        _approve(address(this), address(uniswapV2Router), tokenAmount);
-
+        // swap ETH for tokens
         uniswapV2Router.swapExactETHForTokensSupportingFeeOnTransferTokens{value: tokenAmount}(
             0,
             path,
@@ -1107,8 +1114,7 @@ contract MISAD is Context, IERC20, Ownable {
         path[0] = address(this);
         path[1] = WETH;
 
-        _approve(address(this), address(uniswapV2Router), tokenAmount);
-
+        // swap tokens for ETH
         uniswapV2Router.swapExactTokensForETHSupportingFeeOnTransferTokens(
             tokenAmount,
             0, 
@@ -1119,15 +1125,12 @@ contract MISAD is Context, IERC20, Ownable {
     }
 
     function addLiquidity(uint256 tokenAmount, uint256 ethAmount) private {
-        // approve token transfer to cover all possible scenarios
-        _approve(address(this), address(uniswapV2Router), tokenAmount);
-
         // add the liquidity
         uniswapV2Router.addLiquidityETH{value: ethAmount}(
             address(this),
             tokenAmount,
-            0, // slippage is unavoidable
-            0, // slippage is unavoidable
+            0, 
+            0, 
             owner(),
             block.timestamp
         );
