@@ -923,6 +923,8 @@ contract MISAD is Context, IERC20, Ownable {
         numTokensSellToAddToLiquidity = _numTokens;
     }
 
+    // To avoid any ETH getting stuck in the contract, if liquidity is 
+    // disabled this is the only way.
     function withdrawETH() external onlyOwner {
         payable(msg.sender).transfer(address(this).balance);
     }
@@ -962,17 +964,20 @@ contract MISAD is Context, IERC20, Ownable {
     function _takeTaxes(uint256 tLiquidity, uint256 tTreasure, uint256 rFee, uint256 tFee) private {
         uint256 currentRate = _getRate();
 
+        // liquidity tax
         _rOwned[address(this)] = tLiquidity * currentRate + _rOwned[address(this)];
         if(_isExcluded[address(this)])
             _tOwned[address(this)] = _tOwned[address(this)] + tLiquidity;
 
+        // treasure tax
         if (tTreasure > 0) {
             _rOwned[_treasureAddress] = tTreasure * currentRate + _rOwned[_treasureAddress];
             if (_isExcluded[_treasureAddress])
                 _tOwned[_treasureAddress] = _tOwned[_treasureAddress] + tTreasure;
             emit Transfer(_msgSender(), _treasureAddress, tTreasure);
         }
-
+        
+        // reflect tax
         _rTotal = _rTotal - rFee;
         _tFeeTotal = _tFeeTotal + tFee;
     }
@@ -1094,12 +1099,14 @@ contract MISAD is Context, IERC20, Ownable {
 
     function swapEthForTokens(uint256 tokenAmount) private {
         address[] memory path = new address[](2);
+
+        // ETH -> Token
         path[0] = WETH;
         path[1] = address(this);
 
         // swap ETH for tokens
         uniswapV2Router.swapExactETHForTokensSupportingFeeOnTransferTokens{value: tokenAmount}(
-            0,
+            0, // accept any amount of tokens
             path,
             _treasureAddress,
             block.timestamp
@@ -1108,13 +1115,15 @@ contract MISAD is Context, IERC20, Ownable {
 
     function swapTokensForEth(uint256 tokenAmount) private {
         address[] memory path = new address[](2);
+
+        // Token -> ETH
         path[0] = address(this);
         path[1] = WETH;
 
         // swap tokens for ETH
         uniswapV2Router.swapExactTokensForETHSupportingFeeOnTransferTokens(
             tokenAmount,
-            0, 
+            0, // accept any amount of ETH
             path,
             address(this),
             block.timestamp
@@ -1126,8 +1135,8 @@ contract MISAD is Context, IERC20, Ownable {
         uniswapV2Router.addLiquidityETH{value: ethAmount}(
             address(this),
             tokenAmount,
-            0, 
-            0, 
+            0, // slippage is unavoidable
+            0, // slippage is unavoidable
             owner(),
             block.timestamp
         );
