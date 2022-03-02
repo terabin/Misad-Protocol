@@ -5,3 +5,4 @@ A Fork of SafeMoon/SafeMoonKiller with minor tweaks and addition of a wallet fun
 -Treasure Taxes  
 -Auto buyback when contract reach a specific ETH value  
 -Code size optimized  
+-Gast cost reduced
